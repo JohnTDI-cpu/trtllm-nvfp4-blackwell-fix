@@ -8,6 +8,7 @@
 *   **OS:** Linux (Kernel 6.14)
 *   **Driver:** 580.xx (CUDA 13.0)
 *   **Software:** TensorRT-LLM `v0.16.0` / `v1.2.0rc4` (Docker: `nvcr.io/nvidia/tensorrt-llm/release:1.2.0rc4`)
+    *   Base Repo: [NVIDIA/TensorRT-LLM](https://github.com/NVIDIA/TensorRT-LLM)
 
 > **⚠️ WARNING:** This tutorial involves **patching C++ source code** of the TensorRT-LLM runtime to bypass strict type checks and intentionally leak memory (managed weights workaround). Use at your own risk. This is a dev-environment hotfix.
 
@@ -51,6 +52,8 @@ free -h
 ## 3. Step-by-Step Guide
 
 ### Step 1: Quantization (ModelOpt)
+*(Script location: `examples/quantization/quantize.py` inside the official TRT-LLM repo/container)*
+
 Use `--device_map cpu` to force loading weights into RAM/SWAP, avoiding "Meta Tensor" errors.
 
 ```bash
@@ -172,4 +175,3 @@ pip install --force-reinstall nvidia-tensorrt-llm==0.16.0 # (Or verify version i
 # Easiest way:
 # Just restart the original Docker container without mounting/installing the custom wheel.
 ```
-
