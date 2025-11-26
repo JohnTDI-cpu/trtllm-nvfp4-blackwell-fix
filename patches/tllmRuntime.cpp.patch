@@ -1,0 +1,52 @@
+--- a/cpp/tensorrt_llm/runtime/tllmRuntime.cpp
++++ b/cpp/tensorrt_llm/runtime/tllmRuntime.cpp
+@@ -19,6 +19,7 @@
+ #include "tensorrt_llm/runtime/utils/debugUtils.h"
+ #include <algorithm>
+ #include <cuda_fp16.h>
++#include <cuda_runtime_api.h>
+ 
+ using namespace tensorrt_llm::runtime;
+ 
+@@ -818,8 +819,29 @@ void TllmRuntime::setInputTensorsImpl(
+             auto trtDtype = weight->dtype();
+             auto engineDtype = engine.getTensorDataType(name.c_str());
+ 
+-            TLLM_CHECK_WITH_INFO(static_cast<int>(trtDtype) == static_cast<int>(engineDtype),
+-                "Weight %s has dtype %d but engine expects %d", name.c_str(), static_cast<int>(trtDtype),
+-                static_cast<int>(engineDtype));
+-
+-            auto weightsDevice = std::shared_ptr<ITensor>{manager.allocate(MemoryType::kGPU, trtDims, trtDtype)};
+-            manager.copy(weight->data(), *weightsDevice, MemoryType::kCPU);
++            std::shared_ptr<ITensor> weightsDevice;
++
++            // PATCH: Bypass NVFP4 type check (Engine=FP4/10 vs File=INT8/2 or UINT8/5)
++            if (static_cast<int>(engineDtype) == 10 && (static_cast<int>(trtDtype) == 5 || static_cast<int>(trtDtype) == 2))
++            {
++                TLLM_LOG_WARNING("Patching shape/dtype for NVFP4 weight (LEAK MODE): %s", name.c_str());
++                
++                size_t sizeBytes = 1;
++                for(int i=0; i<trtDims.nbDims; ++i) sizeBytes *= trtDims.d[i];
++
++                void* rawPtr = nullptr;
++                cudaMalloc(&rawPtr, sizeBytes);
++                cudaMemcpy(rawPtr, weight->data(), sizeBytes, cudaMemcpyHostToDevice);
++
++                auto engineDims = trtDims;
++                engineDims.d[engineDims.nbDims - 1] *= 2; // Unpack 4-bit elements
++                size_t capacity = 1;
++                for(int i=0; i<engineDims.nbDims; ++i) capacity *= engineDims.d[i];
++                
++                weightsDevice = ITensor::wrap(rawPtr, engineDtype, engineDims, capacity);
++            }
++            else
++            {
++                TLLM_CHECK_WITH_INFO(static_cast<int>(trtDtype) == static_cast<int>(engineDtype),
++                     "Weight %s has dtype %d but engine expects %d", name.c_str(), static_cast<int>(trtDtype),
++                     static_cast<int>(engineDtype));
++                weightsDevice = std::shared_ptr<ITensor>{manager.allocate(MemoryType::kGPU, trtDims, trtDtype)};
++                manager.copy(weight->data(), *weightsDevice, MemoryType::kCPU);
++            }
+             mManagedWeightsMap.insert(std::make_pair(name, weightsDevice));
+         }
+
