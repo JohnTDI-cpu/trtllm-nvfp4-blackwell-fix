@@ -1,14 +1,14 @@
 # NVFP4 on RTX 5090: The "Impossible" Guide
 ### Running Qwen 2.5/3 30B MoE in 4-bit on 32GB VRAM (Consumer Hardware)
 
-**Authors:** Janusz & AI Assistant
-**Date:** 2025-11-26
+**Authors:** Janusz & AI Assistant  
+**Date:** 2025-11-26  
 **Tested Configuration:**
 *   **GPU:** NVIDIA RTX 5090 (32GB)
 *   **OS:** Linux (Kernel 6.14)
 *   **Driver:** 580.xx (CUDA 13.0)
 *   **Software:** TensorRT-LLM `v0.16.0` / `v1.2.0rc4` (Docker: `nvcr.io/nvidia/tensorrt-llm/release:1.2.0rc4`)
-    *   Base Repo: [NVIDIA/TensorRT-LLM](https://github.com/NVIDIA/TensorRT-LLM)
+*   **Base Repo:** NVIDIA/TensorRT-LLM
 
 > **⚠️ WARNING:** This tutorial involves **patching C++ source code** of the TensorRT-LLM runtime to bypass strict type checks and intentionally leak memory (managed weights workaround). Use at your own risk. This is a dev-environment hotfix.
 
@@ -24,6 +24,17 @@ Testowane na **NVIDIA RTX 5090 (32GB)**. Pomiary wykonano na działającym serwe
 | **TTFT** | **~15 ms** ⚡ | 200-500 ms | 50-100 ms |
 | **VRAM Usage** | **24.1 GB** | N/A | Varies |
 | **Cost/Month** | **$0** (Hardware Owned) | $500-2000+ | $0 |
+
+### Benchmarks (Concurrent Load)
+Tested with [llmperf](https://github.com/ray-project/llmperf) (5 concurrent requests):
+
+| Metric | Value |
+|--------|-------|
+| Overall Throughput | 158.4 tok/s |
+| Requests/min | 52 |
+| Errors | 0 |
+
+This demonstrates TRT-LLM's continuous batching - throughput increases under concurrent load, unlike single-user tools like llama.cpp or LM Studio.
 
 ### 🧠 Context & Architecture
 *   **Model:** Qwen 3 30B A3B Instruct (MoE).
@@ -52,7 +63,7 @@ free -h
 ## 3. Step-by-Step Guide
 
 ### Step 1: Quantization (ModelOpt)
-*(Script location: `examples/quantization/quantize.py` inside the official TRT-LLM repo/container)*
+(Script location: `examples/quantization/quantize.py` inside the official TRT-LLM repo/container)
 
 Use `--device_map cpu` to force loading weights into RAM/SWAP, avoiding "Meta Tensor" errors.
 
@@ -80,7 +91,7 @@ trtllm-build \
 ```
 
 ### Step 3: The C++ Runtime Patch (CRITICAL)
-TRT-LLM v1.2.0rc4 runtime rejects NVFP4 weights loaded via "Managed Weights" because of a type mismatch (`INT8` container vs `FP4` engine expectation) and has a bug in allocation size.
+TRT-LLM v1.2.0rc4 runtime rejects NVFP4 weights loaded via "Managed Weights" because of a type mismatch (INT8 container vs FP4 engine expectation) and has a bug in allocation size.
 
 **File:** `cpp/tensorrt_llm/runtime/tllmRuntime.cpp`
 **Action:** Apply the following patch to `tllmRuntime.cpp` (around line 820, inside `mManagedWeightsMap.insert` loop):
@@ -149,8 +160,7 @@ Check logs to confirm the patch is working. You should see the "Patching shape/d
 ```bash
 docker logs trtllm-qwen-hq | grep "Patching shape/dtype" | head -n 5
 ```
-*Output should look like:*
-`[WARNING] Patching shape/dtype for NVFP4 weight (LEAK MODE): transformer.layers.0.mlp.fc.weight`
+*Output should look like:* `[WARNING] Patching shape/dtype for NVFP4 weight (LEAK MODE): transformer.layers.0.mlp.fc.weight`
 
 Test the API:
 ```bash
